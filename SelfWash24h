@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SelfWash 24h - Lavado inteligente, sin espera</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-50 p-6 font-sans">
+
+  <header class="text-center mb-8">
+    <h1 class="text-5xl font-extrabold text-green-600 tracking-wide select-none">
+      SelfWash <span class="text-blue-500">24h</span>
+    </h1>
+    <p class="mt-2 italic text-gray-700 text-xl font-light select-none">Lavado inteligente, sin espera</p>
+  </header>
+
+  <div class="max-w-5xl mx-auto space-y-6">
+
+    <canvas id="barChart" class="bg-white rounded shadow p-4"></canvas>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+      <section class="bg-white rounded shadow p-6 space-y-4">
+        <h2 class="text-xl font-semibold mb-4">Configuración</h2>
+
+        <label class="block font-semibold">Uso de máquinas (%): <span id="usageVal">20</span>%</label>
+        <input type="range" id="usage" min="0" max="100" value="20" class="w-full" />
+
+        <label class="block font-semibold mt-4">Horas operativas al día: <span id="hoursVal">14</span></label>
+        <input type="range" id="hours" min="1" max="24" value="14" class="w-full" />
+
+        <label class="block font-semibold mt-4">Número de lavadoras: <span id="washersVal">6</span></label>
+        <input type="range" id="washers" min="1" max="20" value="6" class="w-full" />
+
+        <label class="block font-semibold mt-4">Número de secadoras: <span id="dryersVal">6</span></label>
+        <input type="range" id="dryers" min="1" max="20" value="6" class="w-full" />
+
+        <label class="block font-semibold mt-4">Costo por lavado (€):</label>
+        <input type="number" id="washerCost" value="5" min="0" step="0.1" class="w-full border rounded px-2 py-1" />
+
+        <label class="block font-semibold mt-4">Costo por secado (€):</label>
+        <input type="number" id="dryerCost" value="4" min="0" step="0.1" class="w-full border rounded px-2 py-1" />
+
+        <label class="block font-semibold mt-4">Renta mensual (€):</label>
+        <input type="number" id="rent" value="1200" min="0" step="10" class="w-full border rounded px-2 py-1" />
+
+        <label class="block font-semibold mt-4">Seleccionar mes:</label>
+        <input type="month" id="month" value="2025-06" class="w-full border rounded px-2 py-1" />
+      </section>
+
+      <section class="bg-white rounded shadow p-6 space-y-4">
+        <h2 class="text-xl font-semibold mb-4">Resumen y Detalles</h2>
+
+        <p class="text-lg font-semibold text-center mb-4" id="monthRevenue">Ingresos estimados: €0</p>
+
+        <ul class="text-sm space-y-1" id="fixedCostsList">
+          <li>🏠 Renta: €1200</li>
+          <li>💧 Agua y electricidad: €350</li>
+          <li>🧼 Detergentes y consumibles: €250</li>
+          <li>🛠️ Mantenimiento y seguros: €150</li>
+          <li>📢 Publicidad y apps: €200</li>
+          <li>🌐 Internet, TPV y varios: €100</li>
+          <li>📋 Cuota RETA autónomos: €310</li>
+          <li>🧾 IRPF (15% utilidad neta): €0</li>
+        </ul>
+
+        <p class="text-xl font-bold text-center mt-4" id="netProfit">Utilidad neta: €0</p>
+
+        <label class="block font-semibold mt-6">Seleccionar día:</label>
+        <select id="daySelect" class="w-full border rounded px-2 py-1">
+          <!-- días se llenan dinámicamente -->
+        </select>
+
+        <div id="dayDetails" class="mt-4 bg-gray-50 border rounded p-4 hidden">
+          <h3 class="font-semibold mb-2">Detalles del día</h3>
+          <ul class="text-sm space-y-1" id="dayDetailsList"></ul>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    // Costos fijos mensuales
+    const fixedCosts = {
+      utilities: 350,
+      consumables: 250,
+      maintenance: 150,
+      marketing: 200,
+      services: 100,
+      retaQuota: 310,
+      irpfRate: 0.15,
+    };
+
+    const usageInput = document.getElementById('usage');
+    const hoursInput = document.getElementById('hours');
+    const washersInput = document.getElementById('washers');
+    const dryersInput = document.getElementById('dryers');
+    const washerCostInput = document.getElementById('washerCost');
+    const dryerCostInput = document.getElementById('dryerCost');
+    const rentInput = document.getElementById('rent');
+    const monthInput = document.getElementById('month');
+    const daySelect = document.getElementById('daySelect');
+
+    const usageVal = document.getElementById('usageVal');
+    const hoursVal = document.getElementById('hoursVal');
+    const washersVal = document.getElementById('washersVal');
+    const dryersVal = document.getElementById('dryersVal');
+
+    const monthRevenue = document.getElementById('monthRevenue');
+    const netProfitP = document.getElementById('netProfit');
+    const fixedCostsList = document.getElementById('fixedCostsList');
+    const dayDetails = document.getElementById('dayDetails');
+    const dayDetailsList = document.getElementById('dayDetailsList');
+
+    let chart;
+
+    function daysInMonth(monthString) {
+      const [year, month] = monthString.split('-').map(Number);
+      return new Date(year, month, 0).getDate();
+    }
+
+    function generateData() {
+      const daysCount = daysInMonth(monthInput.value);
+      const rent = parseFloat(rentInput.value) || 0;
+      const usage = parseFloat(usageInput.value) / 100;
+      const hours = parseFloat(hoursInput.value);
+      const washers = parseInt(washersInput.value);
+      const dryers = parseInt(dryersInput.value);
+      const washerCost = parseFloat(washerCostInput.value);
+      const dryerCost = parseFloat(dryerCostInput.value);
+
+      const dailyRent = rent / daysCount;
+      const dailyUtilities = fixedCosts.utilities / daysCount;
+      const dailyConsumables = fixedCosts.consumables / daysCount;
+      const dailyMaintenance = fixedCosts.maintenance / daysCount;
+      const dailyMarketing = fixedCosts.marketing / daysCount;
+      const dailyServices = fixedCosts.services / daysCount;
+      const dailyReta = fixedCosts.retaQuota / daysCount;
+
+      const data = [];
+
+      for (let d = 1; d <= daysCount; d++) {
+        const dayStr = `${monthInput.value}-${String(d).padStart(2, '0')}`;
+        const washerCycles = hours * 2 * washers * usage;
+        const dryerCycles = hours * 2 * dryers * usage;
+        const revenue = Math.round(washerCycles * washerCost + dryerCycles * dryerCost);
+        const totalTickets = Math.round(washerCycles + dryerCycles);
+        const totalCosts = dailyRent + dailyUtilities + dailyConsumables + dailyMaintenance + dailyMarketing + dailyServices + dailyReta;
+        const net = Math.round(revenue - totalCosts);
+
+        data.push({
+          day: dayStr,
+          revenue,
+          rent: dailyRent,
+          utilities: dailyUtilities,
+          consumables: dailyConsumables,
+          maintenance: dailyMaintenance,
+          marketing: dailyMarketing,
+          services: dailyServices,
+          retaQuota: dailyReta,
+          net,
+          tickets: totalTickets,
+        });
+      }
+
+      return data;
+    }
+
+    function updateChart(data) {
+      const ctx = document.getElementById('barChart').getContext('2d');
+
+      if(chart) {
+        chart.destroy();
+      }
+
+      const labels = data.map(d => d.day);
+      const rentData = data.map(d => d.rent);
+      const utilitiesData = data.map(d => d.utilities);
+      const consumablesData = data.map(d => d.consumables);
+      const maintenanceData = data.map(d => d.maintenance);
+      const marketingData = data.map(d => d.marketing);
+      const servicesData = data.map(d => d.services);
+      const retaData = data.map(d => d.retaQuota);
+      const netData = data.map(d => d.net);
+
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Renta', data: rentData, backgroundColor: '#fbbf24', stack: 'costs' },
+            { label: 'Agua y electricidad', data: utilitiesData, backgroundColor: '#60a5fa', stack: 'costs' },
+            { label: 'Detergentes y consumibles', data: consumablesData, backgroundColor: '#f472b6', stack: 'costs' },
+            { label: 'Mantenimiento', data: maintenanceData, backgroundColor: '#a78bfa', stack: 'costs' },
+            { label: 'Publicidad y apps', data: marketingData, backgroundColor: '#34d399', stack: 'costs' },
+            { label: 'Servicios varios', data: servicesData, backgroundColor: '#f87171', stack: 'costs' },
+            { label: 'RETA', data: retaData, backgroundColor: '#38bdf8', stack: 'costs' },
+            { label: 'Utilidad neta', data: netData, backgroundColor: '#22c55e', stack: 'profit' },
+          ]
+        },
+        options: {
+          responsive: true,
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
+          stacked: true,
+          scales: {
+            y: {
+              beginAtZero: true,
+              stacked: true,
+            },
+            x: {
+              stacked: true,
+              ticks: {
+                maxRotation: 90,
+                minRotation: 45,
+                maxTicksLimit: 12,
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: {
+                boxWidth: 15,
+                padding: 15,
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label + ': €' + context.parsed.y;
+                }
+              }
+            }
+          },
+          onClick: (e, activeEls) => {
+            if(activeEls.length > 0) {
+              const idx = activeEls[0].index;
+              daySelect.value = data[idx].day;
+              showDayDetails(data[idx]);
+            }
+          }
+        }
+      });
+    }
+
+    function showDayDetails(dayData) {
+      dayDetailsList.innerHTML = `
+        <li>🎟️ Tickets totales: ${dayData.tickets}</li>
+        <li>💵 Ingresos: €${dayData.revenue}</li>
+        <li>🏠 Renta: €${dayData.rent.toFixed(2)}</li>
+        <li>💧 Agua y electricidad: €${dayData.utilities.toFixed(2)}</li>
+        <li>🧼 Detergentes y consumibles: €${dayData.consumables.toFixed(2)}</li>
+        <li>🛠️ Mantenimiento: €${dayData.maintenance.toFixed(2)}</li>
+        <li>📢 Publicidad y apps: €${dayData.marketing.toFixed(2)}</li>
+        <li>🌐 Servicios varios: €${dayData.services.toFixed(2)}</li>
+        <li>📋 RETA: €${dayData.retaQuota.toFixed(2)}</li>
+        <li>💰 Utilidad neta: €${dayData.net}</li>
+      `;
+      dayDetails.classList.remove('hidden');
+    }
+
+    function updateFixedCostsSummary(rentValue, irpf) {
+      fixedCostsList.innerHTML = `
+        <li>🏠 Renta: €${rentValue}</li>
+        <li>💧 Agua y electricidad: €${fixedCosts.utilities}</li>
+        <li>🧼 Detergentes y consumibles: €${fixedCosts.consumables}</li>
+        <li>🛠️ Mantenimiento y seguros: €${fixedCosts.maintenance}</li>
+        <li>📢 Publicidad y apps: €${fixedCosts.marketing}</li>
+        <li>🌐 Internet, TPV y varios: €${fixedCosts.services}</li>
+        <li>📋 Cuota RETA autónomos: €${fixedCosts.retaQuota}</li>
+        <li>🧾 IRPF (15% utilidad neta): €${Math.round(irpf)}</li>
+      `;
+    }
+
+    function updateUI() {
+      usageVal.textContent = usageInput.value;
+      hoursVal.textContent = hoursInput.value;
+      washersVal.textContent = washersInput.value;
+      dryersVal.textContent = dryersInput.value;
+
+      const data = generateData();
+      updateChart(data);
+
+      const totalRevenue = data.reduce((sum, d) => sum + d.revenue, 0);
+      const totalFixedCosts = parseFloat(rentInput.value) + fixedCosts.utilities + fixedCosts.consumables + fixedCosts.maintenance + fixedCosts.marketing + fixedCosts.services + fixedCosts.retaQuota;
+      const taxableProfit = totalRevenue - totalFixedCosts;
+      const irpfTax = taxableProfit > 0 ? taxableProfit * fixedCosts.irpfRate : 0;
+      const netProfit = taxableProfit - irpfTax;
+
+      monthRevenue.textContent = `Ingresos estimados: €${Math.round(totalRevenue)}`;
+      netProfitP.textContent = `Utilidad neta: €${Math.round(netProfit)}`;
+      updateFixedCostsSummary(rentInput.value, irpfTax);
+
+      // Actualizar dropdown de días
+      const daysCount = daysInMonth(monthInput.value);
+      daySelect.innerHTML = '';
+      for(let d=1; d<=daysCount; d++) {
+        const dayStr = `${monthInput.value}-${String(d).padStart(2,'0')}`;
+        const option = document.createElement('option');
+        option.value = dayStr;
+        option.textContent = dayStr;
+        daySelect.appendChild(option);
+      }
+      if (!daySelect.value || daySelect.value < `${monthInput.value}-01`) {
+        daySelect.value = `${monthInput.value}-01`;
+      }
+      // Mostrar detalles del día seleccionado
+      const dayData = data.find(d => d.day === daySelect.value);
+      if(dayData) {
+        showDayDetails(dayData);
+      }
+    }
+
+    // Eventos
+    [usageInput, hoursInput, washersInput, dryersInput, washerCostInput, dryerCostInput, rentInput, monthInput].forEach(input => {
+      input.addEventListener('input', updateUI);
+    });
+
+    daySelect.addEventListener('change', () => {
+      const data = generateData();
+      const dayData = data.find(d => d.day === daySelect.value);
+      if(dayData) {
+        showDayDetails(dayData);
+      }
+    });
+
+    // Inicializar UI
+    updateUI();
+
+  </script>
+
+</body>
+</html>
